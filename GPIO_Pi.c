@@ -80,6 +80,14 @@ const char *_piModelNames [18] =
 static bool _ever = false;
 static bool _supressLogging = false;
 //static bool _GPIO_setup = false;
+static bool _usingGpioMem = false;   
+
+/* RPI 4 has different pullup registers - we need to know if we have that type */
+static bool _pud_type_rpi4 = false;
+//static uint8_t _pud_type_rpi4 = 0;
+
+/* RPI 4 has different pullup operation - make backwards compat */
+//static uint8_t _pud_compat_setting = PUD_OFF;
 
 //#define GPIOrunning(X)  ((X) <= (GPIO_MAX) ? ( ((X) >= (GPIO_MIN) ? (1) : (0)) ) : (0))
 #define GPIOrunning()  (_ever)
@@ -197,6 +205,7 @@ int piBoardId ()
 bool gpioSetup() {
 	int fd;
 	unsigned int piGPIObase = 0;
+  unsigned int piGPIOlen = GPIO_LEN;
 
   printVersionInformation();
 
@@ -212,25 +221,40 @@ bool gpioSetup() {
     case PI_MODEL_ZERO_W:
     //case PI_MODEL_UNKNOWN:
       piGPIObase = (GPIO_BASE_P1 + GPIO_OFFSET);
+      piGPIOlen = GPIO_LEN;
       break ;
 
-    default:
+    case PI_MODEL_4B:
+      piGPIObase = (GPIO_BASE_P4 + GPIO_OFFSET);
+      piGPIOlen = GPIO_LEN_P4;
+      _pud_type_rpi4 = 1;
+      break ;
+
+    default: // Pi 2 and 3
       piGPIObase = (GPIO_BASE_P2 + GPIO_OFFSET);
+      piGPIOlen = GPIO_LEN;
       break ;
   }
 
-   fd = open("/dev/mem", O_RDWR | O_SYNC);
+   //fd = open("/dev/mem", O_RDWR | O_SYNC);
 
-   if (fd<0)
+   if ((fd = open ("/dev/mem", O_RDWR | O_SYNC | O_CLOEXEC)) < 0)
    {
-			LOG_ERROR ( "Failed to open '/dev/mem' for GPIO access (are we root?)\n"); 
-      return false;
+      if ((fd = open ("/dev/gpiomem", O_RDWR | O_SYNC | O_CLOEXEC) ) >= 0)	// We're using gpiomem
+      {
+        piGPIObase   = 0 ;
+        _usingGpioMem = true ;
+        LOG ("Using /dev/gpiomem!");
+      } else {
+			  LOG_ERROR ( "Failed to open '/dev/mem' or '/dev/gpiomem' for GPIO access (are we root?)\n"); 
+        return false;
+      }
    }
 
    _gpioReg = mmap
    (
       0,
-      GPIO_LEN,
+      piGPIOlen,
       PROT_READ|PROT_WRITE|PROT_EXEC,
       MAP_SHARED|MAP_LOCKED,
       fd,
@@ -316,6 +340,36 @@ int digitalWrite(unsigned int gpio, unsigned int level) {
   return GPIO_OK;
 }
 
+int setPullUpDown_Pi4(unsigned int gpio, unsigned int pud)
+{
+  if( _pud_type_rpi4 )
+  {
+    unsigned int pull, bit;
+
+    LOG("Pi4 setPullUpDown() expermental support!");
+
+    switch (pud)
+    {
+      case PUD_OFF:  pull = 0; break;
+      case PUD_UP:   pull = 1; break;
+      case PUD_DOWN: pull = 2; break;
+      default:
+        return GPIO_ERR_GENERAL;
+      break;
+    }
+    int shift = (gpio & 0xf) << 1;
+
+    bit = *(_gpioReg + GPPUPPDN0 + (gpio>>4));
+    bit &= ~(3 << shift);
+    bit |= (pull << shift);
+    *(_gpioReg + GPPUPPDN0 + (gpio>>4)) = bit;
+
+    return GPIO_OK;
+  }
+
+  return GPIO_ERR_GENERAL;
+}
+
 int setPullUpDown(unsigned int gpio, unsigned int pud)
 {
 	unsigned int bank, bit;
@@ -326,27 +380,25 @@ int setPullUpDown(unsigned int gpio, unsigned int pud)
   if (! GPIOrunning())
     return GPIO_ERR_NOT_SETUP;
 
-  bank = gpio >> 5;
+  if (pud > PUD_UP || pud < PUD_OFF)
+	  return GPIO_ERR_GENERAL;
 
+  if( _pud_type_rpi4 ) {
+    return setPullUpDown_Pi4(gpio, pud);
+  }
+
+  bank = gpio >> 5;
   bit = (1 << (gpio & 0x1F));
 
-	/*
-   if (gpio > PI_MAX_GPIO)
-      SOFT_ERROR(PI_BAD_GPIO, "bad gpio (%d)", gpio);
-*/
-   if (pud > PUD_UP || pud < PUD_OFF)
-	   return false;
-      //SOFT_ERROR(PI_BAD_PUD, "gpio %d, bad pud (%d)", gpio, pud);
+  *(_gpioReg + GPPUD) = pud;
+  gpioDelay(1);
+  *(_gpioReg + GPPUDCLK0 + bank) = bit;
+  gpioDelay(1);
+  *(_gpioReg + GPPUD) = 0;
 
-   *(_gpioReg + GPPUD) = pud;
-   gpioDelay(1);
-   *(_gpioReg + GPPUDCLK0 + bank) = bit;
-   gpioDelay(1);
-   *(_gpioReg + GPPUD) = 0;
+  *(_gpioReg + GPPUDCLK0 + bank) = 0;
 
-   *(_gpioReg + GPPUDCLK0 + bank) = 0;
-
-   return GPIO_OK;
+  return GPIO_OK;
 }
 
 #else  // If GPIO_SYSFS_MODE
@@ -744,27 +796,11 @@ bool registerGPIOinterrupt(unsigned int pin, unsigned int mode, void (*function)
 
   if (! validGPIO(pin))
     return false;
-/*
-#ifdef GPIO_SYSFS_MODE
-  if (! isExported(pin)) {
-	  pinExport(pin);
-    gpioDelay(1);
-  }
-  // if the pin is output, set as input to setup edge then reset to output.
-  if (getPinMode(pin) == OUTPUT) {
-		pinMode(pin, INPUT);
-    gpioDelay(1);
-		edgeSetup(pin, mode);
-    gpioDelay(1);
-		pinMode(pin, OUTPUT);
-	} else {
-	  edgeSetup(pin, mode);
-	}
-  gpioDelay(1);
-#else*/
+
 	// Check it's exported
 	if (! isExported(pin))
 	  pinExport(pin);
+    
   // if the pin is output, set as input to setup edge then reset to output.
   if (getPinMode(pin) == OUTPUT) {
 		pinMode(pin, INPUT);

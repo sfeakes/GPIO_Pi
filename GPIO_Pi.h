@@ -15,7 +15,7 @@
  */
 
 #define _GPIO_pi_NAME_ "GPIO Pi"
-#define _GPIO_pi_VERSION_ "1.0"
+#define _GPIO_pi_VERSION_ "1.1"
 
 #ifndef _GPIO_pi_H_
 #define _GPIO_pi_H_
@@ -61,11 +61,14 @@
 #define SYSFS_READ_MAX 3
 
 #ifndef GPIO_SYSFS_MODE
-  #define GPIO_BASE_P2     0x3F000000
-  #define GPIO_BASE_P1     0x20000000
+  #define GPIO_BASE_P4     0xFE000000  // Pi 4
+  #define GPIO_BASE_P2     0x3F000000  // Pi 2 & 3
+  #define GPIO_BASE_P1     0x20000000  // Pi 1 & Zero
   #define GPIO_OFFSET      0x200000
+
   //#define GPIO_BASE 0x20200000
-  #define GPIO_LEN  0xB4
+  #define GPIO_LEN     0xB4
+  #define GPIO_LEN_P4  0xF1  // Pi 4 has more registers BCM2711
 
   #define GPSET0     7
   #define GPSET1     8
@@ -76,10 +79,16 @@
   #define GPLEV0    13
   #define GPLEV1    14
 
-  // Not used yet.
   #define GPPUD     37
   #define GPPUDCLK0 38
   #define GPPUDCLK1 39
+
+  /* Pi4 BCM2711 has different pulls */
+  #define GPPUPPDN0 57
+  #define GPPUPPDN1 58
+  #define GPPUPPDN2 59
+  #define GPPUPPDN3 60
+
 
   #define	PI_MODEL_UNKNOWN -1
   #define	PI_MODEL_A		    0
