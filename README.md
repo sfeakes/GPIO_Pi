@@ -1,7 +1,7 @@
 
 # GPIO Pi
-Embedded GPIO Library to control Raspberry Pi's GPIO ports
-Some of this (most of the difficult logic) was borrowd from http://wiringpi.com, so all credit for the hard stuff goes to Gordon who created WiringPi.
+Embedded GPIO Library to control Raspberry Pi's GPIO ports<br>
+Some/Most of this was borrowd from http://wiringpi.com, so all credit goes to Gordon who created WiringPi.
 
 * <b>This is designed to be small and very efficient C GPIO Library for embedded applications, and NOTHING else</b>
 # Reason for being
@@ -20,7 +20,7 @@ The main differances.<br>
   - GPIO Pi just supports basic GPIO control, and will never do anything else.
 
 Most function signitures and constants are identical to Wiring Pi, makeing compiling between the two as simply as pissible.<br>
-Some of the code was simply cut n pate from Wiring Pi, and other parts use the logic, so the credit for this must go to Goron from Wiring Pi. 
+Some of the code was simply cut n pate from Wiring Pi, and other parts use the logic or Wiring Pi, so the credit for this must go to Goron from Wiring Pi. 
 
 # Notes
 
