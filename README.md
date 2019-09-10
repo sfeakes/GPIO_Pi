@@ -24,9 +24,10 @@ Some of the code was simply cut n pate from Wiring Pi, and other parts use the l
 
 # Notes
 
-This is a C GPIO library for Raspberry Pi's.<br>
-I will not modify this for other Pi clones.<br>
-If you are looking for a Python / Node library, you don't need one, you can simply use the simply use the Pi's file system to read and write to GPIO pins (as this does in SYSFS Mode). OK, So this is faster as it uses memory father than file system, but speed isn't important since your using Python or Node.
+- This is a C GPIO library for Raspberry Pi's.<br>
+- I will not modify this for other Pi clones.<br>
+- If you are looking for a Python / Node library, you don't need one, you can simply use the simply use the Pi's file system to read and write to GPIO pins. Read up on '/sys/class/gpio' on the Pi. OK, So this is faster as it uses memory address rather than the file system, but speed isn't important since your using Python or Node.
+- If you're looking for some tools to do GPIO control with bash/csh/sh scripts, then the supplied gpio & gpio_monitor are perfect for you.
 
 # TL;DR Install
 get the repo, or GPIO_pi.c and GPIO_pi.h, copy it to your project and compile against it.

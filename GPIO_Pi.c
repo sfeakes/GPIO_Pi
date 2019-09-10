@@ -1048,16 +1048,15 @@ int main(int argc, char *argv[]) {
 
 bool FOREVER = true;
 
-
-void displayLastSystemError (const char *on_what)
+void errorParms(char *fname)
 {
-  fputs (strerror (errno), stderr);
-  fputs (": ", stderr);
-  fputs (on_what, stderr);
-  fputc ('\n', stderr);
-
-  LOG_ERROR ( "%d : %s", errno, on_what);
-
+  printVersionInformation();
+  printf("Parameters:-\n\t<list of numbers>\t- GPIO's to monitor\n"\
+                               "\t-q\t\t\t- Quiet mode, (must be last param) just print whats been triggered, no startup state\n"\
+                               "\t-h\t\t\t- This\n"\
+                               "\t<no numbers>\t\t- Monitor everything\n"\
+                               "eg :- %s 2 17 27 -q\n",fname);
+  exit(1);
 }
 
 void intHandler(int signum) {
@@ -1077,13 +1076,32 @@ void event_trigger (int pin)
   printGPIOstatus(pin);
 }
 
+void setup_monitor(int pin)
+{
+#ifdef GPIO_SYSFS_MODE
+  if (! isExported(pin)) {
+    pinExport(pin);
+    gpioDelay(10); // 0.1 second
+  }
+#endif
+
+  if (!_supressLogging){printGPIOstatus(pin);}
+  if (registerGPIOinterrupt (pin, INT_EDGE_BOTH, (void *)&event_trigger, (void *)pin) != true)
+  {
+    LOG_ERROR ( "Unable to set interrupt handler for specified pin. Error (%d) - %s\n",errno, strerror (errno));
+  }
+}
+
 int main(int argc, char *argv[]) {
 
   int i;
 
   if (strcmp (argv[argc-1], "-q") == 0) {
     _supressLogging = true;
-  }
+    argc--;
+  } else if (strcmp (argv[argc-1], "-h") == 0) {
+    errorParms(argv[0]);
+  } 
 
   if (! gpioSetup()) {
     LOG_ERROR ( "Failed to setup GPIO\n");
@@ -1094,22 +1112,12 @@ int main(int argc, char *argv[]) {
   signal(SIGTERM, intHandler);
   signal(SIGSEGV, intHandler);
 
-  for (i=GPIO_MIN; i <= GPIO_MAX; i++) {
-    //printf ("Pin %d is %d\n", i, digitalRead(i));
-#ifdef GPIO_SYSFS_MODE
-    if (! isExported(i)) {
-      pinExport(i);
-      gpioDelay(10); // 0.1 second
-    }
-#endif
-    if (!_supressLogging){printGPIOstatus(i);}
-    if (registerGPIOinterrupt (i, INT_EDGE_BOTH, (void *)&event_trigger, (void *)i) != true)
-    {
-      //displayLastSystemError ("Unable to set interrupt handler for specified pin, exiting");
-      LOG_ERROR ( "Unable to set interrupt handler for specified pin. Error (%d) - %s\n",errno, strerror (errno));
-      gpioShutdown();
-      return 1;
-    }
+  if (argc > 1) {
+    for (i=1; i < argc; i++)
+     setup_monitor( atoi(argv[i]));
+  } else {
+    for (i=GPIO_MIN; i <= GPIO_MAX; i++)
+      setup_monitor(i);
   }
 
   while(FOREVER) {
@@ -1121,81 +1129,3 @@ int main(int argc, char *argv[]) {
 
 #endif //GPIO_MONITOR
 
-//#define TEST_HARNESS
-
-#ifdef TEST_HARNESS
-
-#define GPIO_OFF   0x00005000  /* Offset from IO_START to the GPIO reg's. */
-
-/* IO_START and IO_BASE are defined in hardware.h */
-
-#define GPIO_START (IO_START_2 + GPIO_OFF) /* Physical addr of the GPIO reg. */
-#define GPIO_BASE_NEW  (IO_BASE_2  + GPIO_OFF) /* Virtual addr of the GPIO reg. */
-
-
-void *myCallBack(void * args) {
-  printf("Ping\n");
-	//struct threadGPIOinterupt *stuff = (struct threadGPIOinterupt *) args;
-	//printf("Pin is %d\n",stuff->pin);
-}
-
-#define PIN  17
-#define POUT  27
-int main(int argc, char *argv[]) {
-
-  int repeat = 3;
-
-  // if (-1 == GPIOExport(POUT) || -1 == GPIOExport(PIN))
-  //              return(1);
-  gpioSetup();
-/*
-	pinUnexport(POUT);
-	pinUnexport(PIN);
-	pinExport(POUT);
-	pinExport(PIN);
-*/
-  sleep(1);
-
-	//edgeSetup(POUT, INT_EDGE_BOTH);
-
-  if (-1 == pinMode(POUT, OUTPUT) || -1 == pinMode(PIN, INPUT))
-    return (2);
-
-  //edgeSetup(PIN, INT_EDGE_RISING);
-  //edgeSetup(POUT, INT_EDGE_RISING);
-
-  if (pinExport(POUT) != true) 
-		printf("Error exporting pin\n");
-	/*
-  if (registerGPIOinterrupt(POUT, INT_EDGE_RISING, (void *)&myCallBack, (void *)&repeat ) != true)
-	  printf("Error registering interupt\n");
-
-	if (registerGPIOinterrupt(PIN, INT_EDGE_RISING, (void *)&myCallBack, (void *)&repeat ) != true)
-	  printf("Error registering interupt\n");
-	*/
-
-  do {
-
-		printf("Writing %d to GPIO %d\n", repeat % 2, POUT);
-    if (-1 == digitalWrite(POUT, repeat % 2))
-      return (3);
-
-
-    printf("Read %d from GPIO %d (input)\n", digitalRead(PIN), PIN);
-    printf("Read %d from GPIO %d (output)\n", digitalRead(POUT), POUT);
-
-    usleep(500 * 1000);
-  } while (repeat--);
-
-  gpioShutdown();
-	
-  sleep(1);
-
-  if (-1 == pinUnexport(POUT) || -1 == pinUnexport(PIN))
-    return (4);
-
-  sleep(1);
-
-  return (0);
-}
-#endif
