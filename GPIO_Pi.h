@@ -14,6 +14,10 @@
  *  https://github.com/sfeakes/GPIO_pi
  */
 
+/********************->  GPIO Pi v1.1  <-********************/
+
+
+
 #define _GPIO_pi_NAME_ "GPIO Pi"
 #define _GPIO_pi_VERSION_ "1.1"
 
@@ -110,8 +114,9 @@
 
 #endif
 
-#define GPIO_ERR_GENERAL    -5
-#define GPIO_NOT_OUTPUT     -6
+#define GPIO_ERR_GENERAL    -7
+#define GPIO_NOT_IO_MODE    -6
+#define GPIO_NOT_OUTPUT     -5
 #define GPIO_NOT_EXPORTED   -4
 #define GPIO_ERR_IO         -3
 #define GPIO_ERR_NOT_SETUP  -2
@@ -130,7 +135,7 @@ int setPullUpDown(unsigned int gpio, unsigned int pud);
 int edgeSetup (unsigned int pin, unsigned int value);
 bool gpioSetup();
 void gpioShutdown();
-bool registerGPIOinterrupt(unsigned int gpio, unsigned int mode, void (*function)(void *args), void *args );
+int registerGPIOinterrupt(unsigned int gpio, unsigned int mode, void (*function)(void *args), void *args );
 /*
 #else
 bool pinExport(int pin);

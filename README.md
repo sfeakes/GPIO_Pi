@@ -85,7 +85,7 @@ Most function signitures and constants are identical to Wiring Pi, makeing compi
 - <b>bool registerGPIOinterrupt(int gpio, int mode, void (*function)(void *args), void *args );</b>
   - Register a function to be called when a state has changed on a pin.
   - gpio = GPIO Pin number.  ie 4 for GPIO4 physical pin #7
-  - mode = `INT_EDGE_SETUP`, `INT_EDGE_FALLING`, `INT_EDGE_RISING`, `INT_EDGE_BOTH`
+  - mode = `INT_EDGE_SETUP`, `INT_EDGE_FALLING`, `INT_EDGE_RISING`, `INT_EDGE_BOTH` (INT_EDGE_SETUP = don't setup Edge, is only valid in SYSFS mode)
   - function = function name, should be defined as `void *myCallBack(void * args)`
   - args = pointer to be passed to function.
 
@@ -113,7 +113,7 @@ Most function signitures and constants are identical to Wiring Pi, makeing compi
 - OUTPUT            = 1
 - LOW               = 0
 - HIGH              = 1
-- INT_EDGE_SETUP	= 0
+- INT_EDGE_SETUP	= 0  (INT_EDGE_SETUP is only valid when compiled with GPIO_SYSFS_MODE mode)
 - INT_EDGE_FALLING	= 1
 - INT_EDGE_RISING	= 2
 - INT_EDGE_BOTH		= 3

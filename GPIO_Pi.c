@@ -14,9 +14,8 @@
  *  https://github.com/sfeakes/GPIO_pi
  */
 
-/*
-*   Version 1.0
-*/
+/********************->  GPIO Pi v1.1  <-********************/
+
 
 /*
 * Note, all referances to pin in this code is the GPIO pin# not the physical pin#
@@ -53,6 +52,11 @@
   #define LOG(fmt, ...) log_message (false, "%s: " fmt, _GPIO_pi_NAME_,##__VA_ARGS__)
 #else
   #define LOG(...) {}
+#endif
+
+
+#ifdef GPIO_SYSFS_MODE
+  #define GPIO_SYSFS_INTERRUPT
 #endif
 
 const char *_piModelNames [18] =
@@ -127,6 +131,16 @@ void printVersionInformation()
 #else
   LOG ("v%s\n",_GPIO_pi_VERSION_);
 #endif
+}
+
+void gpioDelay (unsigned int howLong) // Microseconds (1000000 = 1 second)
+{
+  struct timespec sleeper, dummy ;
+
+  sleeper.tv_sec  = (time_t)(howLong / 1000) ;
+  sleeper.tv_nsec = (long)(howLong % 1000) * 1000000 ;
+
+  nanosleep (&sleeper, &dummy) ;
 }
 
 #ifndef GPIO_SYSFS_MODE
@@ -276,7 +290,10 @@ int pinMode(unsigned int gpio, unsigned int mode) {
 
   if (! GPIOrunning())
     return GPIO_ERR_NOT_SETUP;
-  
+
+  if (mode != INPUT && mode != OUTPUT)
+    return GPIO_NOT_IO_MODE;
+
   reg = gpio / 10;
   shift = (gpio % 10) * 3;
 
@@ -310,13 +327,12 @@ int digitalRead(unsigned int gpio) {
     return GPIO_ERR_NOT_SETUP;
 
   bank = gpio >> 5;
-
   bit = (1 << (gpio & 0x1F));
 
-  if ((*(_gpioReg + GPLEV0 + bank) & bit) != 0)
-    return 1;
+  if ((*(_gpioReg + GPLEV0 + bank) & bit) != LOW)
+    return HIGH;
   else
-    return 0;
+    return LOW;
 }
 
 int digitalWrite(unsigned int gpio, unsigned int level) {
@@ -329,10 +345,9 @@ int digitalWrite(unsigned int gpio, unsigned int level) {
     return GPIO_ERR_NOT_SETUP;
 
   bank = gpio >> 5;
-
   bit = (1 << (gpio & 0x1F));
 
-  if (level == 0)
+  if (level == LOW)
     *(_gpioReg + GPCLR0 + bank) = bit;
   else
     *(_gpioReg + GPSET0 + bank) = bit;
@@ -401,6 +416,8 @@ int setPullUpDown(unsigned int gpio, unsigned int pud)
   return GPIO_OK;
 }
 
+
+
 #else  // If GPIO_SYSFS_MODE
 
 // There is no need to setup GPIO memory in sysfs mode, so simply set setup state.
@@ -425,6 +442,9 @@ int pinMode (unsigned int pin, unsigned int mode)
 
   if (! isExported(pin))
     return GPIO_NOT_EXPORTED;
+
+   if (mode != INPUT && mode != OUTPUT)
+    return GPIO_NOT_IO_MODE;
 
 	char path[SYSFS_PATH_MAX];
 	int fd;
@@ -563,15 +583,7 @@ int digitalWrite (unsigned int gpio, unsigned int value)
 }
 #endif  // GPIO_SYSFS_MODE
 
-void gpioDelay (unsigned int howLong) // Microseconds (1000000 = 1 second)
-{
-  struct timespec sleeper, dummy ;
-
-  sleeper.tv_sec  = (time_t)(howLong / 1000) ;
-  sleeper.tv_nsec = (long)(howLong % 1000) * 1000000 ;
-
-  nanosleep (&sleeper, &dummy) ;
-}
+#ifdef GPIO_SYSFS_INTERRUPT
 
 bool isExported(unsigned int pin)
 {
@@ -788,8 +800,7 @@ static void *interruptHandler (void *arg)
   return NULL ;
 }
 
-
-bool registerGPIOinterrupt(unsigned int pin, unsigned int mode, void (*function)(void *args), void *args ) 
+int registerGPIOinterrupt(unsigned int pin, unsigned int mode, void (*function)(void *args), void *args ) 
 {
   pthread_t threadId ;
 	struct threadGPIOinterupt stuff;
@@ -800,32 +811,199 @@ bool registerGPIOinterrupt(unsigned int pin, unsigned int mode, void (*function)
 	// Check it's exported
 	if (! isExported(pin))
 	  pinExport(pin);
-    
+
+  // Setup pin if defined.
+  if (mode != INT_EDGE_SETUP) {
   // if the pin is output, set as input to setup edge then reset to output.
-  if (getPinMode(pin) == OUTPUT) {
-		pinMode(pin, INPUT);
-		edgeSetup(pin, mode);
-		pinMode(pin, OUTPUT);
-	} else {
-	  edgeSetup(pin, mode);
-	}
+    if (getPinMode(pin) == OUTPUT) {
+		  pinMode(pin, INPUT);
+		  edgeSetup(pin, mode);
+		  pinMode(pin, OUTPUT);
+	  } else {
+	    edgeSetup(pin, mode);
+	  }
+  }
 //#endif
   stuff.function = function;
 	stuff.args = args;
 	stuff.pin = pin;
 
   pthread_mutex_lock (&pinMutex) ;
-    if (pthread_create (&threadId, NULL, interruptHandler, (void *)&stuff) < 0) 
-      return false;
-    else {
+    if (pthread_create (&threadId, NULL, interruptHandler, (void *)&stuff) < 0) {
+      LOG_ERROR("Failed to start interruptHandler thread\n");
+      return GPIO_ERR_GENERAL;
+    } else {
 			while (stuff.pin == pin)
 			gpioDelay(1);
     }
 
   pthread_mutex_unlock (&pinMutex) ;
 
-  return true ;
+  return GPIO_OK ;
 }
+
+
+#else // GPIO_SYSFS_INTERRUPT
+
+#include <pthread.h> 
+
+struct GPIOinterupt{
+	void (*function)(void *args);
+	void *args;
+	unsigned int pin;
+  unsigned int bit;
+  unsigned int bank;
+  unsigned int lastValue;
+  unsigned int edge;
+  pthread_t threadId;
+  pthread_mutex_t mutex;
+  pthread_cond_t cond;
+  struct GPIOinterupt *next;
+};
+
+#define POLL_DELAY 10
+
+static struct GPIOinterupt *_GPIOinterupts = NULL;
+static pthread_t _interruptHandlerThreadId = 0;
+static pthread_mutex_t _gpioRegisterMutex;
+
+
+static void *GPIOinterruptHandler (void *arg)
+{
+  struct GPIOinterupt *data = (struct GPIOinterupt *) arg;
+  void (*function)(void *args) = data->function;
+	void *args = data->args;
+
+  pthread_mutex_lock(&data->mutex);
+
+  while (_ever == true) {
+    //printf("GPIOinterruptHandler() %d wait\n", data->pin);  
+    pthread_cond_wait(&data->cond, &data->mutex);
+    if (_ever == true) {// recheck _ever incase this is a shutdown signal.
+      // Check edge
+      if ( (data->edge == INT_EDGE_BOTH) ||
+           (data->edge == INT_EDGE_RISING && data->lastValue == HIGH) ||
+           (data->edge == INT_EDGE_FALLING && data->lastValue == LOW)) 
+      {
+         function(args);
+      }
+      //printf("GPIOinterruptHandler() called gpio %d\n",data->pin);
+    }
+  }
+
+  pthread_mutex_unlock(&data->mutex);
+  //printf("GPIOinterruptHandler() stopped gpio %d\n",data->pin);
+
+  free(arg);
+  pthread_exit(0);
+  return NULL;
+}
+
+
+static void *interruptHandler(void *arg)
+{
+  // Use the global var and not one that passed, just incase we change the global pointer in the future
+  // to redefine starting position.
+  //struct GPIOinterupt *GPIOinterupt = (struct GPIOinterupt *) arg;
+
+  //unsigned int bank, bit;
+  struct GPIOinterupt *i_ptr;
+
+  while (_ever == true) {
+    for (i_ptr = _GPIOinterupts; i_ptr != NULL; i_ptr = i_ptr->next) {
+      
+      if (i_ptr->threadId <= 0) {
+        if (pthread_create (&i_ptr->threadId, NULL, GPIOinterruptHandler, (void *)i_ptr) < 0) {
+          LOG_ERROR("Can't create GPIO interupt handler for GPIO %d\n",i_ptr->pin);
+        }
+        //printf("Create Thread\n");
+      }
+
+      if (i_ptr->lastValue != digitalRead(i_ptr->pin))
+      //if (i_ptr->lastValue != ((*(_gpioReg + GPLEV0 + i_ptr->bank) & i_ptr->bit)==0?LOW:HIGH) )
+      {
+        i_ptr->lastValue = !i_ptr->lastValue;
+        pthread_cond_signal(&i_ptr->cond);
+      }
+    }
+    gpioDelay(POLL_DELAY);
+  }
+
+  // signel so thread can shutdown
+  for (i_ptr = _GPIOinterupts; i_ptr != NULL; i_ptr = i_ptr->next) {
+    if (i_ptr->threadId > 0) {
+      pthread_cond_signal(&i_ptr->cond);
+    }
+  }
+
+  printf("interruptHandler() stopped\n");
+
+  pthread_exit(0);
+  return NULL;
+}
+
+int registerGPIOinterrupt(unsigned int gpio, unsigned int mode, void (*function)(void *args), void *args ) 
+{
+
+  if (! validGPIO(gpio))
+    return GPIO_ERR_BAD_PIN;
+
+  if (! GPIOrunning())
+    return GPIO_ERR_NOT_SETUP;
+
+  if (mode == INT_EDGE_SETUP) {
+    LOG("INT_EDGE_SETUP is only valid for sysfs mode");
+    mode = INT_EDGE_BOTH;
+  }
+
+  // Lock the function, this isn't thread safe.
+  pthread_mutex_lock (&_gpioRegisterMutex);
+
+  struct GPIOinterupt *i_ptr;
+  struct GPIOinterupt *interupt = calloc(1, sizeof(struct GPIOinterupt));
+  
+  interupt->function = function;
+  interupt->args = args;
+  interupt->pin = gpio;
+  interupt->edge = mode;
+  interupt->lastValue = digitalRead(gpio);
+  interupt->threadId = 0;
+  interupt->next = NULL;
+
+  interupt->bank = gpio >> 5;
+  interupt->bit = (1 << (gpio & 0x1F));
+  //interupt->lastValue = (*(_gpioReg + GPLEV0 + i_ptr->bank) & i_ptr->bit)==0?0:1)
+
+  if (_GPIOinterupts == NULL) {
+    _GPIOinterupts = interupt;
+  } else {
+    for (i_ptr = _GPIOinterupts; i_ptr->next != NULL; i_ptr = i_ptr->next) {} // Simply run to the end of the list
+    i_ptr->next = interupt;
+  }
+
+  if ( _interruptHandlerThreadId <= 0 ) {
+    if (pthread_create (&_interruptHandlerThreadId, NULL, interruptHandler, (void *)_GPIOinterupts) < 0) {
+      LOG_ERROR("Couldn't start GPIO interrupt handler\n");
+      return GPIO_ERR_GENERAL;
+    } else {
+		//while (_interupts[_numInterupts-1].running == false)
+		//gpioDelay(1);
+    }
+  }
+
+  pthread_mutex_unlock (&_gpioRegisterMutex) ;
+
+  return GPIO_OK;
+}
+
+void gpioShutdown() {
+	//int i;
+	_ever = false;
+	// Wait enough time for interupt handler poll cycle to catch the shutdown
+  gpioDelay(POLL_DELAY);
+}
+
+#endif //GPIO_SYSFS_INTERUPT
 
 
 #if defined(TEST_HARNESS) || defined(GPIO_MONITOR) || defined(GPIO_RW) || defined(GPIO_TOOL)
@@ -891,11 +1069,15 @@ void printGPIOstatus(int pin)
 void errorParms(char *fname)
 {
   printVersionInformation();
-  printf("Missing Parameters:-\n\t[read|write] <pin> <value>\t- read/write to GPIO\n"\
-                               "\t[input|output] <pin>\t\t- set GPIO to input or output\n"\
-                               "\t[export|unexport] <pin>\t\t- (un)export GPIO, needed for sysfs mode\n"\
-                               "\treadall\t\t\t\t- Print information on every GPIO\n"\
-                               "\t\t-q\t\t\t- Optional LAST parameter to just output result\n"\
+  printf("Missing Parameters:-\n\t[read|write] <pin> <value>\t- read/write to GPIO\n"
+                               "\t[input|output] <pin>\t\t- set GPIO to input or output\n"
+#ifdef GPIO_SYSFS_MODE
+                               "\t[export|unexport] <pin>\t\t- (un)export GPIO, needed for sysfs mode\n"
+#else
+                               "\t[pud_off|pud_up|pud_down] <pin>\t\t- set pull up / down resistor\n"
+#endif
+                               "\treadall\t\t\t\t- Print information on every GPIO\n"
+                               "\t\t-q\t\t\t- Optional LAST parameter to just output result\n"
                                "\teg :- %s write 17 1 -q\n",fname);
   exit(1);
 }
@@ -1003,6 +1185,7 @@ int main(int argc, char *argv[]) {
     pin = atoi(argv[2]);
     int rtn = pinMode(pin, OUTPUT);
      (_supressLogging?printf("%d\n",rtn):printGPIOstatus(pin));
+#ifdef GPIO_SYSFS_MODE
    } else if (strcmp (argv[1], "export") == 0) {
     if (argc < 3)
       errorParms(argv[0]);
@@ -1015,6 +1198,26 @@ int main(int argc, char *argv[]) {
     pin = atoi(argv[2]);
     int rtn = pinUnexport(pin);
     printf("%d\n",rtn);
+#else
+  } else if (strcmp (argv[1], "pud_off") == 0) {
+    if (argc < 3)
+      errorParms(argv[0]);
+    pin = atoi(argv[2]);
+    int rtn = setPullUpDown(pin, PUD_OFF);
+    (_supressLogging?printf("%d\n",rtn):printGPIOstatus(pin));
+  } else if (strcmp (argv[1], "pud_up") == 0) {
+    if (argc < 3)
+      errorParms(argv[0]);
+    pin = atoi(argv[2]);
+    int rtn = setPullUpDown(pin, PUD_UP);
+    (_supressLogging?printf("%d\n",rtn):printGPIOstatus(pin));
+  } else if (strcmp (argv[1], "pud_down") == 0) {
+    if (argc < 3)
+      errorParms(argv[0]);
+    pin = atoi(argv[2]);
+    int rtn = setPullUpDown(pin, PUD_DOWN);
+    (_supressLogging?printf("%d\n",rtn):printGPIOstatus(pin));
+#endif
   } else if (strcmp (argv[1], "readall") == 0) {
     readAllGPIOs();
   } else 
@@ -1099,6 +1302,9 @@ void intHandler(int signum) {
   static int called=0;
   LOG ( "Stopping! - signel(%d)\n",signum);
   gpioShutdown();
+/*
+  gpioDelay(100);
+*/
   FOREVER = false;
   called++;
   if (called > 3)
@@ -1122,10 +1328,11 @@ void setup_monitor(int pin)
 #endif
 
   if (!_supressLogging){printGPIOstatus(pin);}
-  if (registerGPIOinterrupt (pin, INT_EDGE_BOTH, (void *)&event_trigger, (void *)pin) != true)
+  if (registerGPIOinterrupt(pin, INT_EDGE_BOTH, (void *)&event_trigger, (void *)pin) != GPIO_OK)
   {
     LOG_ERROR ( "Unable to set interrupt handler for specified pin. Error (%d) - %s\n",errno, strerror (errno));
   }
+   //gpioDelay(100); // REMOVE THIS WHEN DONE
 }
 
 int main(int argc, char *argv[]) {
@@ -1157,7 +1364,7 @@ int main(int argc, char *argv[]) {
   }
 
   while(FOREVER) {
-    sleep(10);
+    sleep(100);
   }
 
   return 0;
