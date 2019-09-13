@@ -55,7 +55,7 @@
 #endif
 
 #ifdef GPIO_DEBUG
-  #define DEBUG(fmt, ...) log_message (false, "%s (%s): " fmt, _GPIO_pi_NAME_,"DEBUG",##__VA_ARGS__)
+  #define DEBUG(fmt, ...) log_message (false, "%s: (%s) " fmt, _GPIO_pi_NAME_,"DEBUG",##__VA_ARGS__)
 #else
   #define DEBUG(...) {}
 #endif
@@ -178,7 +178,7 @@ int piBoardId ()
   for (c = &line [strlen (line) - 1] ; (*c == '\n') || (*c == '\r') ; --c)
     *c = 0 ;
   
-  LOG ( "pi Board Revision string: %s\n", line) ;
+  DEBUG ( "pi Board Revision string: %s\n", line) ;
 
 // Scan to the first character of the revision number
 
@@ -200,10 +200,9 @@ int piBoardId ()
 
   revision = (unsigned int)strtol (c, NULL, 16) ; // Hex number with no leading 0x
    
-// Check for new way:
-
   if ((revision &  (1 << 23)) != 0)	// New way
-  {/*
+  {
+    /*
     bRev      = (revision & (0x0F <<  0)) >>  0 ;*/
     bType     = (revision & (0xFF <<  4)) >>  4 ;
 		/*
@@ -264,7 +263,7 @@ bool gpioSetup() {
       {
         piGPIObase   = 0 ;
         _usingGpioMem = true ;
-        LOG ("Using /dev/gpiomem!");
+        LOG ("Using /dev/gpiomem!\n");
       } else {
 			  LOG_ERROR ( "Failed to open '/dev/mem' or '/dev/gpiomem' for GPIO access (are we root?)\n"); 
         return false;
