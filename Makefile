@@ -16,8 +16,8 @@ LIBS := -lm -lpthread
 # debug of not
 #DBG = -g -O0 -fsanitize=address -static-libasan
 #DBG = -g
-DBG = -D GPIO_DEBUG
-#DBG =
+#DBG = -D GPIO_DEBUG
+DBG =
 
 # define any compile-time flags
 GCCFLAGS = -Wall -O3
