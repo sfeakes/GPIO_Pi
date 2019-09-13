@@ -14,12 +14,12 @@
  *  https://github.com/sfeakes/GPIO_pi
  */
 
-/********************->  GPIO Pi v1.1  <-********************/
+/********************->  GPIO Pi v1.2  <-********************/
 
 
 
 #define _GPIO_pi_NAME_ "GPIO Pi"
-#define _GPIO_pi_VERSION_ "1.1"
+#define _GPIO_pi_VERSION_ "1.2"
 
 #ifndef _GPIO_pi_H_
 #define _GPIO_pi_H_

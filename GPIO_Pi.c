@@ -14,7 +14,7 @@
  *  https://github.com/sfeakes/GPIO_pi
  */
 
-/********************->  GPIO Pi v1.1  <-********************/
+/********************->  GPIO Pi v1.2  <-********************/
 
 
 /*
@@ -52,6 +52,12 @@
   #define LOG(fmt, ...) log_message (false, "%s: " fmt, _GPIO_pi_NAME_,##__VA_ARGS__)
 #else
   #define LOG(...) {}
+#endif
+
+#ifdef GPIO_DEBUG
+  #define DEBUG(fmt, ...) log_message (false, "%s (%s): " fmt, _GPIO_pi_NAME_,"DEBUG",##__VA_ARGS__)
+#else
+  #define DEBUG(...) {}
 #endif
 
 
@@ -874,6 +880,8 @@ static void *GPIOinterruptHandler (void *arg)
   void (*function)(void *args) = data->function;
 	void *args = data->args;
 
+  DEBUG("Created Thread for GPIO interrupt %d\n",data->pin);
+
   pthread_mutex_lock(&data->mutex);
 
   while (_ever == true) {
@@ -885,7 +893,8 @@ static void *GPIOinterruptHandler (void *arg)
            (data->edge == INT_EDGE_RISING && data->lastValue == HIGH) ||
            (data->edge == INT_EDGE_FALLING && data->lastValue == LOW)) 
       {
-         function(args);
+        DEBUG("GPIO interrupt triggered for %d\n",data->pin);
+        function(args);
       }
       //printf("GPIOinterruptHandler() called gpio %d\n",data->pin);
     }
@@ -893,6 +902,7 @@ static void *GPIOinterruptHandler (void *arg)
 
   pthread_mutex_unlock(&data->mutex);
   //printf("GPIOinterruptHandler() stopped gpio %d\n",data->pin);
+  DEBUG("Stopping thread for GPIO interrupt %d\n",data->pin);
 
   free(arg);
   pthread_exit(0);
@@ -914,9 +924,8 @@ static void *interruptHandler(void *arg)
       
       if (i_ptr->threadId <= 0) {
         if (pthread_create (&i_ptr->threadId, NULL, GPIOinterruptHandler, (void *)i_ptr) < 0) {
-          LOG_ERROR("Can't create GPIO interupt handler for GPIO %d\n",i_ptr->pin);
+          LOG_ERROR("Can't create GPIO interrupt handler for GPIO %d\n",i_ptr->pin);
         }
-        //printf("Create Thread\n");
       }
 
       if (i_ptr->lastValue != digitalRead(i_ptr->pin))
@@ -936,7 +945,7 @@ static void *interruptHandler(void *arg)
     }
   }
 
-  printf("interruptHandler() stopped\n");
+  DEBUG("interruptHandler stopped\n");
 
   pthread_exit(0);
   return NULL;
@@ -986,6 +995,7 @@ int registerGPIOinterrupt(unsigned int gpio, unsigned int mode, void (*function)
       LOG_ERROR("Couldn't start GPIO interrupt handler\n");
       return GPIO_ERR_GENERAL;
     } else {
+      DEBUG("interruptHandler started\n");
 		//while (_interupts[_numInterupts-1].running == false)
 		//gpioDelay(1);
     }

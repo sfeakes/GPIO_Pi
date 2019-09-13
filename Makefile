@@ -16,6 +16,7 @@ LIBS := -lm -lpthread
 # debug of not
 #DBG = -g -O0 -fsanitize=address -static-libasan
 #DBG = -g
+#DBG = -D GPIO_DEBUG
 DBG =
 
 # define any compile-time flags
@@ -34,7 +35,7 @@ OUT_DIR = ./bin
 MAIN = gpio_tools
 GMON = $(OUT_DIR)/gpio_monitor
 GPIO = $(OUT_DIR)/gpio
-TEST = $(OUT_DIR)/gpio_test
+#TEST = $(OUT_DIR)/gpio_test
 
 #
 # The following part of the makefile is generic; it can be used to 
@@ -57,13 +58,21 @@ gpio_tool: $(SRC) | $(OUT_DIR)
 gpio_monitor: $(SRC) | $(OUT_DIR)
 	$(CC) -o $(GMON) $(DBG) $(SRC) $(CFLAGS) -D GPIO_MONITOR $(LOG) $(SYSFS)
 	
-gpio_test: gpio_pi_sample.c $(SRC) | $(OUT_DIR)
-	$(CC) -o $(TEST) $(DBG) gpio_pi_sample.c $(SRC) $(CFLAGS) $(SYSFS) -D GPIO_LOG_ENABLED
-
 $(OUT_DIR):
 	@mkdir -p $(OUT_DIR)
 
+# Samples
+
+SRCS = $(wildcard ./samples/*.c)
+PROGS = $(patsubst %.c,%,$(SRCS))
+samples: $(PROGS)
+
+%: %.c
+	$(CC) $(CFLAGS) $(LIBS) $(DBG) $(LOG) $(SYSFS) GPIO_Pi.c -I ./ -o $@ $<
+
+
+
 clean:
-	$(RM) *.o *~ $(GMON) $(GPIO) $(TEST)
+	$(RM) *.o *~ $(GMON) $(GPIO) $(PROGS)
 
 

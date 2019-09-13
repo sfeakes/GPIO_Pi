@@ -31,10 +31,10 @@ int main(int argc, char *argv[]) {
   if (pinMode(p_out, OUTPUT) < 0 || pinMode(p_in, INPUT) < 0)
     return (2);
 
-  if (registerGPIOinterrupt(p_in, INT_EDGE_BOTH, (void *)&myCallBack, (void *)&p_in ) != true)
+  if (registerGPIOinterrupt(p_in, INT_EDGE_BOTH, (void *)&myCallBack, (void *)&p_in ) != GPIO_OK)
 	  printf("Error registering interupt\n");
   
-	if (registerGPIOinterrupt(p_out, INT_EDGE_BOTH, (void *)&myCallBack, (void *)&p_out ) != true)
+	if (registerGPIOinterrupt(p_out, INT_EDGE_BOTH, (void *)&myCallBack, (void *)&p_out ) != GPIO_OK)
 	  printf("Error registering interupt\n");
 	
   do {
@@ -85,10 +85,10 @@ int main(int argc, char *argv[]) {
 
   sleep(1);
 
-  if (registerGPIOinterrupt(p_in, INT_EDGE_BOTH, (void *)&myCallBack, (void *)&p_in ) != true)
+  if (registerGPIOinterrupt(p_in, INT_EDGE_BOTH, (void *)&myCallBack, (void *)&p_in ) != GPIO_OK)
 	  printf("Error registering interupt\n");
   
-	if (registerGPIOinterrupt(p_out, INT_EDGE_BOTH, (void *)&myCallBack, (void *)&p_out ) != true)
+	if (registerGPIOinterrupt(p_out, INT_EDGE_BOTH, (void *)&myCallBack, (void *)&p_out ) != GPIO_OK)
 	  printf("Error registering interupt\n");
 	
   do {
