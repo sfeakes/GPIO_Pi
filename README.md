@@ -67,7 +67,7 @@ Most function signitures and constants are identical to Wiring Pi, makeing compi
   - Return >0 on failure , `true` on good.
 - <b>int getPinMode(unsigned gpio);</b>
   - Get GPIO mode
-  - Return >0 on failure , `INPUT` or `OUTPUT` (0 or 1).
+  - Return >0 on failure , `INPUT`, `OUTPUT` or `IO_ALT0` to `IO_ALT5`.
 - <b>int setPullUpDown(unsigned gpio, unsigned pud);</b>
   - gpio = GPIO Pin number.  ie 4 for GPIO4 physical pin #7
   - Set pull up / pull down resistor,
@@ -108,21 +108,34 @@ Most function signitures and constants are identical to Wiring Pi, makeing compi
 - int edgeSetup (unsigned int pin, unsigned int value);
 
 ## Constants
-
+#### IO modes
 - INPUT             = 0
 - OUTPUT            = 1
+- IO_ALT0           = 4
+- IO_ALT1           = 5
+- IO_ALT2           = 6
+- IO_ALT3           = 7
+- IO_ALT4           = 3
+- IO_ALT5           = 2
+#### High or Low (on / off)
 - LOW               = 0
 - HIGH              = 1
+#### Edge
 - INT_EDGE_SETUP	= 0  (INT_EDGE_SETUP is only valid when compiled with GPIO_SYSFS_MODE mode)
 - INT_EDGE_FALLING	= 1
 - INT_EDGE_RISING	= 2
 - INT_EDGE_BOTH		= 3
+#### Pull up / down resistor
 - PUD_OFF			= 0
 - PUD_DOWN		    = 1
 - PUD_UP			= 2
 
 # Version
 
+## 1.2
+- Created GPIO triggers from memory rather than sysfs
+- added unregisterInterupt()
+- more IO modes listed
 ## 1.1
 - Added support for Pi 4. (Not fully tested) 
 ## 1.0 Initial Release

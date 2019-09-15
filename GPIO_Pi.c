@@ -257,8 +257,11 @@ bool gpioSetup() {
 
    //fd = open("/dev/mem", O_RDWR | O_SYNC);
 
-   if ((fd = open ("/dev/mem", O_RDWR | O_SYNC | O_CLOEXEC)) < 0)
-   {
+  if ((fd = open ("/dev/mem", O_RDWR | O_SYNC | O_CLOEXEC)) < 0)
+  {
+    //LOG_ERROR ( "Failed to open '/dev/mem' for GPIO access (are we root?)\n"); 
+    //return false;
+    // Something odd going on with writes on /dev/gpiomem, need to fix this.
       if ((fd = open ("/dev/gpiomem", O_RDWR | O_SYNC | O_CLOEXEC) ) >= 0)	// We're using gpiomem
       {
         piGPIObase   = 0 ;
@@ -296,7 +299,7 @@ int pinMode(unsigned int gpio, unsigned int mode) {
   if (! GPIOrunning())
     return GPIO_ERR_NOT_SETUP;
 
-  if (mode != INPUT && mode != OUTPUT)
+  if (mode < INPUT || mode > IO_ALT3)
     return GPIO_NOT_IO_MODE;
 
   reg = gpio / 10;
@@ -318,6 +321,8 @@ int getPinMode(unsigned int gpio) {
 
   reg = gpio / 10;
   shift = (gpio % 10) * 3;
+
+  //DEBUG("getPinMode read %d from GPIO %d\n",(*(_gpioReg + reg) >> shift) & 7,gpio);
 
   return (*(_gpioReg + reg) >> shift) & 7;
 }
@@ -351,6 +356,8 @@ int digitalWrite(unsigned int gpio, unsigned int level) {
 
   bank = gpio >> 5;
   bit = (1 << (gpio & 0x1F));
+
+  DEBUG("Writing %d to GPIO %d\n",level==LOW?0:1,gpio);
 
   if (level == LOW)
     *(_gpioReg + GPCLR0 + bank) = bit;
@@ -860,6 +867,7 @@ struct GPIOinterupt{
   unsigned int bank;
   unsigned int lastValue;
   unsigned int edge;
+  bool running;
   pthread_t threadId;
   pthread_mutex_t mutex;
   pthread_cond_t cond;
@@ -878,21 +886,24 @@ static void *GPIOinterruptHandler (void *arg)
   struct GPIOinterupt *data = (struct GPIOinterupt *) arg;
   void (*function)(void *args) = data->function;
 	void *args = data->args;
+  data->running = true;
 
   DEBUG("Created Thread for GPIO interrupt %d\n",data->pin);
 
   pthread_mutex_lock(&data->mutex);
 
-  while (_ever == true) {
+  while (_ever == true && data->running == true) {
     //printf("GPIOinterruptHandler() %d wait\n", data->pin);  
     pthread_cond_wait(&data->cond, &data->mutex);
-    if (_ever == true) {// recheck _ever incase this is a shutdown signal.
+    DEBUG("GPIO interrupt triggered for %d\n",data->pin);
+    // recheck _ever incase this is a shutdown signal, and running incase we've been told to shutdown
+    if (_ever == true && data->running == true) {
       // Check edge
       if ( (data->edge == INT_EDGE_BOTH) ||
            (data->edge == INT_EDGE_RISING && data->lastValue == HIGH) ||
            (data->edge == INT_EDGE_FALLING && data->lastValue == LOW)) 
       {
-        DEBUG("GPIO interrupt triggered for %d\n",data->pin);
+        //DEBUG("GPIO interrupt triggered for %d\n",data->pin);
         function(args);
       }
       //printf("GPIOinterruptHandler() called gpio %d\n",data->pin);
@@ -918,9 +929,9 @@ static void *interruptHandler(void *arg)
   //unsigned int bank, bit;
   struct GPIOinterupt *i_ptr;
 
-  while (_ever == true) {
+  while (_ever == true && _GPIOinterupts != NULL) {
     for (i_ptr = _GPIOinterupts; i_ptr != NULL; i_ptr = i_ptr->next) {
-      
+      //DEBUG ("Poll %d\n",i_ptr->pin);
       if (i_ptr->threadId <= 0) {
         if (pthread_create (&i_ptr->threadId, NULL, GPIOinterruptHandler, (void *)i_ptr) < 0) {
           LOG_ERROR("Can't create GPIO interrupt handler for GPIO %d\n",i_ptr->pin);
@@ -945,7 +956,7 @@ static void *interruptHandler(void *arg)
   }
 
   DEBUG("interruptHandler stopped\n");
-
+  _interruptHandlerThreadId = 0;
   pthread_exit(0);
   return NULL;
 }
@@ -976,6 +987,7 @@ int registerGPIOinterrupt(unsigned int gpio, unsigned int mode, void (*function)
   interupt->edge = mode;
   interupt->lastValue = digitalRead(gpio);
   interupt->threadId = 0;
+  interupt->running = false;
   interupt->next = NULL;
 
   interupt->bank = gpio >> 5;
@@ -997,6 +1009,44 @@ int registerGPIOinterrupt(unsigned int gpio, unsigned int mode, void (*function)
       DEBUG("interruptHandler started\n");
 		//while (_interupts[_numInterupts-1].running == false)
 		//gpioDelay(1);
+    }
+  }
+
+  pthread_mutex_unlock (&_gpioRegisterMutex) ;
+
+  return GPIO_OK;
+}
+
+int unregisterGPIOinterrupt(unsigned int gpio) 
+{
+  struct GPIOinterupt *i_ptr;
+  struct GPIOinterupt *d_ptr;
+
+  // Lock the function, this isn't thread safe.
+  pthread_mutex_lock (&_gpioRegisterMutex);
+
+  // Is it the first pin in the list
+  if (_GPIOinterupts->pin == gpio) {
+    DEBUG("First pin ADD CODE");
+    d_ptr = _GPIOinterupts;
+    _GPIOinterupts = d_ptr->next;
+    d_ptr->running = false;
+    pthread_cond_signal(&d_ptr->cond); // Wake up the thread so it can exit
+    // Let's be safe, and let's hope we call this before the thread cleans itself up.
+    pthread_mutex_unlock(&d_ptr->mutex);
+  } else {
+    for (i_ptr = _GPIOinterupts; i_ptr->next != NULL && i_ptr->next->pin != gpio; i_ptr = i_ptr->next) {}
+    if (i_ptr->next != NULL) {
+      d_ptr = i_ptr->next;
+      DEBUG("Removing listner on pin %d\n", d_ptr->pin); 
+      i_ptr->next = i_ptr->next->next;
+      d_ptr->running = false;
+      pthread_cond_signal(&d_ptr->cond); // Wake up the thread so it can exit
+      // Let's be safe, and let's hope we call this before the thread cleans itself up.
+      pthread_mutex_unlock(&d_ptr->mutex);
+    } else {
+      LOG_ERROR("GPIO %d not registered as listner\n",gpio);
+      return GPIO_ERR_BAD_PIN;
     }
   }
 
@@ -1066,9 +1116,41 @@ int GPIO2physicalPin(int gpio)
   return -1;
 }
 
+char *GPIOmode2txt(unsigned int mode) {
+  switch (mode) {
+    case INPUT:
+      return "IN";
+    break;
+    case OUTPUT:
+      return "OUT";
+    break;
+    case IO_ALT0:
+      return "ALT0";
+    break;
+    case IO_ALT1:
+      return "ALT1";
+    break;
+    case IO_ALT2:
+      return "ALT2";
+    break;
+    case IO_ALT3:
+      return "ALT3";
+    break;
+    case IO_ALT4:
+      return "ALT4";
+    break;
+    case IO_ALT5:
+      return "ALT5";
+    break;
+    default:
+      return "---";
+    break;
+  }
+}
+
 void printGPIOstatus(int pin)
 {
-  printf ("GPIO %2d (Pin %2d|%-3s) = %d\n", pin ,GPIO2physicalPin(pin),(getPinMode(pin)==INPUT?"IN":"OUT") , digitalRead(pin));
+  printf ("GPIO %2d (Pin %2d|%-4s) = %d\n", pin ,GPIO2physicalPin(pin),GPIOmode2txt(getPinMode(pin)) , digitalRead(pin));
 }
 
 #endif //TEST_HARNESS || GPIO_MONITOR
@@ -1079,11 +1161,12 @@ void errorParms(char *fname)
 {
   printVersionInformation();
   printf("Missing Parameters:-\n\t[read|write] <pin> <value>\t- read/write to GPIO\n"
-                               "\t[input|output] <pin>\t\t- set GPIO to input or output\n"
+                               "\t[input|output] <pin>\t\t- set GPIO mode to input or output\n"
 #ifdef GPIO_SYSFS_MODE
                                "\t[export|unexport] <pin>\t\t- (un)export GPIO, needed for sysfs mode\n"
 #else
-                               "\t[pud_off|pud_up|pud_down] <pin>\t\t- set pull up / down resistor\n"
+                               "\tmode <pin> <value>\t\t- set GPIO mode advanced value=0 to 7\n"
+                               "\t[pud_off|pud_up|pud_down] <pin>\t- set pull up / down resistor\n"
 #endif
                                "\treadall\t\t\t\t- Print information on every GPIO\n"
                                "\t\t-q\t\t\t- Optional LAST parameter to just output result\n"
@@ -1116,8 +1199,8 @@ void readAllGPIOs()
   char buf3[10];
   char buf4[10];
   printf("-----------------------------------------------------------------\n");
-  printf("| GPIO |  Name  | Mode | V |  Pin #  | V |  Mode  | Name | GPIO |\n");
-  printf("+------+--------+------+---+---------+---+--------+------+------+\n");
+  printf("| GPIO |  Name  | Mode | V |  Pin #  | V | Mode |  Name  | GPIO |\n");
+  printf("+------+--------+------+---+---------+---+------+--------+------+\n");
   for (i=0; i <= 38; i+=2) {
 #ifdef GPIO_SYSFS_MODE
     if (!isExported(_pinDetails[i].GPIO)) {
@@ -1132,12 +1215,12 @@ void readAllGPIOs()
     printf("| %4s | %6s | %4s |%2s | %2d | %2d |%2s | %4s | %6s | %4s |\n",
           GPIOitoa(_pinDetails[i].GPIO,buf1,10), 
           _pinDetails[i].name, 
-          _pinDetails[i].GPIO==-1?"-":(getPinMode(_pinDetails[i].GPIO)==INPUT?"IN":"OUT"), 
+          _pinDetails[i].GPIO==-1?"-":GPIOmode2txt(getPinMode(_pinDetails[i].GPIO)), 
           GPIOitoa(digitalRead(_pinDetails[i].GPIO),buf2,10), 
           _pinDetails[i].pin,
           _pinDetails[i+1].pin, 
           GPIOitoa(digitalRead(_pinDetails[i+1].GPIO),buf3,10), 
-          _pinDetails[i+1].GPIO==-1?"-":(getPinMode(_pinDetails[i+1].GPIO)==INPUT?"IN":"OUT"),
+          _pinDetails[i+1].GPIO==-1?"-":GPIOmode2txt(getPinMode(_pinDetails[i+1].GPIO)),
           _pinDetails[i+1].name, 
           GPIOitoa(_pinDetails[i+1].GPIO,buf4,10));
   }
@@ -1177,7 +1260,7 @@ int main(int argc, char *argv[]) {
     digitalWrite(pin, value);
     if (pmode != OUTPUT) {
       if (!_supressLogging){printGPIOstatus(pin);}
-      usleep(500 * 1000); // Allow any triggers to read value before reset back to input
+      usleep(500 * 1000); // Allow any triggers to read value before reset back to origional mode
       if (!_supressLogging){printf("Resetting to input mode\n");}
       pinMode (pin, pmode);
     }
@@ -1208,6 +1291,13 @@ int main(int argc, char *argv[]) {
     int rtn = pinUnexport(pin);
     printf("%d\n",rtn);
 #else
+  } else if (strcmp (argv[1], "mode") == 0) {
+    if (argc < 4)
+      errorParms(argv[0]);
+    pin = atoi(argv[2]);
+    int mode = atoi(argv[3]);
+    int rtn = pinMode(pin, mode);
+    (_supressLogging?printf("%d\n",rtn):printGPIOstatus(pin));
   } else if (strcmp (argv[1], "pud_off") == 0) {
     if (argc < 3)
       errorParms(argv[0]);

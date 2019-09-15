@@ -38,9 +38,8 @@ GPIO = $(OUT_DIR)/gpio
 #TEST = $(OUT_DIR)/gpio_test
 
 #
-# The following part of the makefile is generic; it can be used to 
-# build any executable just by changing the definitions above and by
-# deleting dependencies appended to the file from 'make depend'
+#  Don't use .o files in the make as GPIO_Pi.c is dependant on flags when compiling the tools.
+#  samples (and your project) we don't care about, compile normally. ie re-use GPIO_Pi.o
 #
 
 .PHONY: depend clean
@@ -49,20 +48,21 @@ all:    $(MAIN)
   echo: $(MAIN) have been compiled
 
 gpio_tools: gpio_tool gpio_monitor
-#	$(CC) -o $(GPIO) $(DBG) $(SRC) $(CFLAGS) -D GPIO_TOOL $(LOG)
-#	$(CC) -o $(GMON) $(DBG) $(SRC) $(CFLAGS) -D GPIO_MONITOR $(LOG)
+gpio_tool: $(GPIO)
+gpio_monitor: $(GMON)
 
-gpio_tool: $(SRC) | $(OUT_DIR)
+$(GPIO): $(SRC) | $(OUT_DIR)
 	$(CC) -o $(GPIO) $(DBG) $(SRC) $(CFLAGS) -D GPIO_TOOL $(LOG) $(SYSFS)
 
-gpio_monitor: $(SRC) | $(OUT_DIR)
+$(GMON): $(SRC) | $(OUT_DIR)
 	$(CC) -o $(GMON) $(DBG) $(SRC) $(CFLAGS) -D GPIO_MONITOR $(LOG) $(SYSFS)
 	
 $(OUT_DIR):
 	@mkdir -p $(OUT_DIR)
 
+#
 # Samples
-
+#
 SRCS = $(wildcard ./samples/*.c)
 PROGS = $(patsubst %.c,%,$(SRCS))
 samples: $(PROGS)

@@ -46,8 +46,15 @@
 
 #ifndef USE_WIRINGPI // Don't include anything below this line if using wiringpi.
 
-#define INPUT  0
-#define OUTPUT 1
+#define INPUT     0
+#define OUTPUT    1
+#define IO_ALT5   2 // PWM Circuit
+#define IO_ALT4   3 // SPI Circuit
+#define IO_ALT0   4 // PCM Audio Circuit (Also I2C)
+#define IO_ALT1   5 // SMI (Secondary Memory Interface)
+#define IO_ALT2   6 // Nothing
+#define IO_ALT3   7 // BSC - SPI Circuit
+
 
 #define LOW  0
 #define HIGH 1
@@ -136,6 +143,11 @@ int edgeSetup (unsigned int pin, unsigned int value);
 bool gpioSetup();
 void gpioShutdown();
 int registerGPIOinterrupt(unsigned int gpio, unsigned int mode, void (*function)(void *args), void *args );
+
+#ifndef GPIO_SYSFS_INTERRUPT
+int unregisterGPIOinterrupt(unsigned int gpio);
+#endif
+
 /*
 #else
 bool pinExport(int pin);

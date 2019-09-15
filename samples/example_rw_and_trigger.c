@@ -18,7 +18,7 @@ void *myCallBack(void * args) {
 
 
 #ifndef GPIO_SYSFS_MODE
-// If we are NOT in susfs mode
+// If we are NOT in sysfs mode
 
 int main(int argc, char *argv[]) {
 
